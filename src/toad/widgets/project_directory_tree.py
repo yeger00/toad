@@ -41,7 +41,7 @@ This shows the files in your project directory.
         classes: str | None = None,
         disabled: bool = False,
     ) -> None:
-        self._path_filter: PathFilter | None = None
+        self.path_filter: PathFilter | None = None
         path = Path(path).resolve() if isinstance(path, str) else path.resolve()
         super().__init__(path, name=name, id=id, classes=classes, disabled=disabled)
 
@@ -60,8 +60,8 @@ This shows the files in your project directory.
 
     async def on_mount(self) -> None:
         path = Path(self.path) if isinstance(self.path, str) else self.path
-        path = path.resolve()
-        self._path_filter = await asyncio.to_thread(PathFilter.from_git_root, path)
+        path = await asyncio.to_thread(path.resolve)
+        self.path_filter = await asyncio.to_thread(PathFilter.from_git_root, path)
 
     def filter_paths(self, paths: Iterable[Path]) -> Iterable[Path]:
         """Filter the paths before adding them to the tree.
@@ -77,7 +77,7 @@ This shows the files in your project directory.
         version of this method.
         """
 
-        if (path_filter := self._path_filter) is not None:
+        if (path_filter := self.path_filter) is not None:
             for path in paths:
                 if not path_filter.match(path):
                     yield path
