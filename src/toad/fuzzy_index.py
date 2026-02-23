@@ -75,7 +75,7 @@ class FuzzyIndex:
     def _find_candidates(
         self,
         query: str,
-        min_trigram_overlap: float = 0.2,
+        min_trigram_overlap: float = 0.3,
     ) -> list[tuple[str, str]]:
         """Return the indices of paths that share enough trigrams with the query.
 
@@ -87,8 +87,15 @@ class FuzzyIndex:
                 on to the slower detailed scoring stage.
 
         """
+        # An upper limit to the number of candidates
+        # If there are this many matches, the user will need to type an additional character or two
+        MAX_CANDIDATES = 2000
+
         query = query.casefold()
-        if len(query) <= 2:
+        query_length = len(query)
+        if query_length == 1:
+            # One character
+            # Find paths which have the query on the first component
             slash_query = f"/{query}"
             candidates = list(
                 islice(
@@ -97,15 +104,20 @@ class FuzzyIndex:
                         for path, normalized_path in zip(
                             self._paths, self._normalized_paths
                         )
-                        if normalized_path.startswith(query)
-                        or slash_query in normalized_path
+                        if (
+                            normalized_path.startswith(query)
+                            or slash_query in normalized_path
+                        )
                     ),
                     None,
-                    40,
+                    MAX_CANDIDATES,
                 )
             )
-            if candidates:
-                return candidates
+            return candidates
+
+        if query_length <= 3:
+            # Find paths which have all the characters
+            query_set = set(query)
             candidates = list(
                 islice(
                     (
@@ -113,16 +125,13 @@ class FuzzyIndex:
                         for path, normalized_path in zip(
                             self._paths, self._normalized_paths
                         )
-                        if query in normalized_path or slash_query in normalized_path
+                        if query_set.issubset(normalized_path)
                     ),
                     None,
-                    40,
+                    MAX_CANDIDATES,
                 )
             )
             return candidates
-
-        if len(query) == 3:
-            min_trigram_overlap /= 2
 
         index = self._index
         query_trigrams = self._extract_trigrams(query)
@@ -142,7 +151,7 @@ class FuzzyIndex:
                     if count >= minimum_shared_trigrams
                 ),
                 None,
-                10000,
+                MAX_CANDIDATES,
             )
         )
         candidates = list(unique_candidates.keys())
