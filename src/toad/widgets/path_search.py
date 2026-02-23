@@ -149,7 +149,7 @@ class PathSearch(containers.VerticalGroup):
         Binding("tab", "switch_picker", "Switch picker", priority=True, show=False),
     ]
 
-    def get_fuzzy_search(self) -> FuzzySearch:
+    def get_fuzzy_search(self) -> PathFuzzySearch:
         return PathFuzzySearch(case_sensitive=False)
 
     root: var[Path] = var(Path("./"))
@@ -158,7 +158,7 @@ class PathSearch(containers.VerticalGroup):
     filtered_path_indices: var[list[int]] = var(list)
     loaded = var(False)
     filter = var("")
-    fuzzy_search: var[FuzzySearch] = var(Initialize(get_fuzzy_search))
+    fuzzy_search: var[PathFuzzySearch] = var(Initialize(get_fuzzy_search))
     show_tree_picker: var[bool] = var(False)
 
     option_list = getters.query_one(FuzzyPathOptionList)
@@ -450,8 +450,6 @@ class PathSearch(containers.VerticalGroup):
     @work(description="watch_paths")
     async def watch_paths(self, paths: list[Path]) -> None:
 
-        self.option_list.highlighted = None
-
         def path_display(path: Path) -> str:
             try:
                 is_directory = path.is_dir()
@@ -469,6 +467,7 @@ class PathSearch(containers.VerticalGroup):
 
         self.display_paths = await asyncio.to_thread(make_display_paths)
 
+        self.option_list.highlighted = None
         self._update_paths(self.display_paths)
 
         self.option_list.set_options(

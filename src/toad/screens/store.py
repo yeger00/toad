@@ -439,6 +439,10 @@ class StoreScreen(Screen):
                 with AgentGridSelect(classes="agents-picker", min_column_width=40):
                     for agent in recommended_agents:
                         yield AgentItem(agent)
+            yield widgets.Static(
+                "[$text-warning]Your agent here[/] — support development of Toad by [@click=screen.url('https://github.com/sponsors/willmcgugan')]sponsoring[/] this project",
+                classes="sponsor-me",
+            )
 
         coding_agents = [agent for agent in ordered_agents if agent["type"] == "coding"]
         if coding_agents:

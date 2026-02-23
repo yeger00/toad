@@ -14,7 +14,7 @@ type = "coding"
 description = "The open platform for cloud coding agents. Scale from one to thousands of agents — open source, model-agnostic, and enterprise-ready. New users get [$text-success bold]$10[/] in free OpenHands Cloud credits!"
 tags = []
 run_command."*" = "openhands acp"
-recommended = true
+recommended = false
 
 help = '''
 # OpenHands
