@@ -235,7 +235,8 @@ class Agent(AgentBase):
                 "sessionUpdate": "user_message_chunk",
                 "content": {"type": type, "text": text},
             }:
-                self.post_message(messages.UserMessage(type, text))
+                if text:
+                    self.post_message(messages.UserMessage(type, text))
 
             case {
                 "sessionUpdate": "agent_message_chunk",
@@ -478,7 +479,6 @@ class Agent(AgentBase):
                 AgentFail("Failed to start agent; no run command for this OS")
             )
             return
-
         try:
             process = self._process = await asyncio.create_subprocess_shell(
                 command,

@@ -13,6 +13,7 @@ publisher_url = "https://willmcgugan.github.io/"
 type = "coding"
 description = "State-of-the-art, open-source agentic coding models and CLI agent."
 tags = []
+run_command."*" = "vibe-acp"
 recommended = true
 
 help = '''
