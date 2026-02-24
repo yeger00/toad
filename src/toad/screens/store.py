@@ -309,7 +309,9 @@ class AgentGridSelect(GridSelect):
         if self.highlighted is None:
             return
         child = self.children[self.highlighted]
-        assert isinstance(child, AgentItem)
+        if not isinstance(child, AgentItem):
+            self.app.open_url("https://github.com/sponsors/willmcgugan")
+            return
         self.post_message(messages.LaunchAgent(child.agent["identity"]))
 
 
@@ -484,6 +486,9 @@ class StoreScreen(Screen):
     @on(GridSelect.Selected, ".agents-picker")
     @work
     async def on_grid_select_selected(self, event: GridSelect.Selected):
+        if not isinstance(event.widget, AgentItem):
+            self.app.open_url("https://github.com/sponsors/willmcgugan")
+            return
         assert isinstance(event.widget, AgentItem)
         from toad.screens.agent_modal import AgentModal
 
