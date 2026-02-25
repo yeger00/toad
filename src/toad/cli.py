@@ -287,6 +287,7 @@ def replay(path: str) -> None:
 
 
 @main.command("serve")
+@click.argument("tunnel_url", metavar="TUNNEL_URL", required=False, default=None)
 @click.option("-p", "--port", metavar="PORT", default=8000, type=int)
 @click.option("-H", "--host", metavar="HOST", default="localhost")
 @click.option(
@@ -295,8 +296,24 @@ def replay(path: str) -> None:
     default=None,
     help="Public URL for textual_serve Server (e.g. https://example.com)",
 )
-def serve(port: int, host: str, public_url: str | None = None) -> None:
-    """Serve Toad as a web application."""
+def serve(
+    tunnel_url: str | None,
+    port: int,
+    host: str,
+    public_url: str | None = None,
+) -> None:
+    """Serve Toad as a web application.
+
+    When TUNNEL_URL is provided (e.g. https://my-app.heroku.com), connects
+    to the Heroku relay server and exposes Toad on a public URL.
+    """
+    if tunnel_url:
+        import asyncio
+        from toad.heroku_tunnel import HerokuTunnel
+
+        asyncio.run(HerokuTunnel().run(tunnel_url))
+        return
+
     from textual_serve.server import Server
 
     server = Server(
