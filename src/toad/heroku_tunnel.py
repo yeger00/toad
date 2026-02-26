@@ -77,6 +77,8 @@ class HerokuTunnel:
         self._endpoint: str = ""
         self._tunnel_ws: Any = None
         self._session: Any = None  # aiohttp.ClientSession
+        self._register_url: str = ""
+        self._ssl_ctx: Any = None
 
     async def run(self, heroku_url: str) -> None:
         import aiohttp
@@ -90,42 +92,70 @@ class HerokuTunnel:
         else:
             ws_url = self._heroku_url
 
-        register_url = f"{ws_url}/register"
-        ssl_ctx = _make_ssl_context()
+        self._register_url = f"{ws_url}/register"
+        self._ssl_ctx = _make_ssl_context()
 
         async with aiohttp.ClientSession() as session:
             self._session = session
-            async with session.ws_connect(register_url, ssl=ssl_ctx) as ws:
-                self._tunnel_ws = ws
-
-                msg = await ws.receive_json()
-                if msg.get("type") != "registered":
-                    print(f"Unexpected message: {msg}", file=sys.stderr)
-                    return
-
-                self._endpoint = msg["endpoint"]
-                lobby_url = msg["url"]
-
-                print(f"Share this URL to spawn sessions: {lobby_url}")
-                sys.stdout.flush()
-
+            delay = 1.0
+            while True:
                 try:
-                    async for msg in ws:
-                        if msg.type == aiohttp.WSMsgType.TEXT:
-                            try:
-                                data = json.loads(msg.data)
-                            except json.JSONDecodeError:
-                                continue
-                            await self._dispatch(data)
-                        elif msg.type in (
-                            aiohttp.WSMsgType.ERROR,
-                            aiohttp.WSMsgType.CLOSE,
-                        ):
-                            break
-                finally:
-                    for sd in list(self._sessions.values()):
-                        if sd.proc.returncode is None:
-                            sd.proc.terminate()
+                    await self._connect_once()
+                    delay = 1.0
+                except asyncio.CancelledError:
+                    break
+                except Exception as exc:
+                    print(f"Connection lost ({exc}), retrying in {delay:.0f}s…")
+                    await asyncio.sleep(delay)
+                    delay = min(delay * 2, 30.0)
+
+        for sd in list(self._sessions.values()):
+            if sd.proc.returncode is None:
+                sd.proc.terminate()
+
+    async def _connect_once(self) -> None:
+        import aiohttp
+
+        async with self._session.ws_connect(self._register_url, ssl=self._ssl_ctx) as ws:
+            self._tunnel_ws = ws
+
+            # New handshake: client speaks first
+            await ws.send_json({
+                "type": "register",
+                "preferred_endpoint": self._endpoint or None,
+            })
+
+            msg = await ws.receive_json()
+            if msg.get("type") != "registered":
+                print(f"Unexpected message: {msg}", file=sys.stderr)
+                return
+
+            self._endpoint = msg["endpoint"]
+            lobby_url = msg["url"]
+
+            print(f"Share this URL to spawn sessions: {lobby_url}")
+            sys.stdout.flush()
+
+            # Restore existing sessions after reconnect
+            if self._sessions:
+                await ws.send_json({
+                    "type": "restore_sessions",
+                    "sessions": list(self._sessions.keys()),
+                })
+
+            async for msg in ws:
+                if msg.type == aiohttp.WSMsgType.TEXT:
+                    try:
+                        data = json.loads(msg.data)
+                    except json.JSONDecodeError:
+                        continue
+                    await self._dispatch(data)
+                elif msg.type in (
+                    aiohttp.WSMsgType.ERROR,
+                    aiohttp.WSMsgType.CLOSE,
+                ):
+                    break
+            # Processes stay alive across reconnects — no terminate() here
 
     # ------------------------------------------------------------------
     # Dispatch
