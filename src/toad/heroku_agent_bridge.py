@@ -413,12 +413,13 @@ function connect() {
   ws.addEventListener('open', () => {
     retryDelay = 1000;
     if (everConnected) {
-      // Reconnecting to a live session — ask the bridge to re-confirm agent state
       setStatus('Reconnecting…', '');
-      ws.send(JSON.stringify({ type: 'reconnect' }));
     } else {
       setStatus('Starting agent…', '');
     }
+    // Always send reconnect so the server can immediately confirm agent state
+    // if the agent is already running (e.g. after a page refresh).
+    ws.send(JSON.stringify({ type: 'reconnect' }));
   });
 
   ws.addEventListener('message', e => {
@@ -572,19 +573,34 @@ class TerminalManager:
         env: dict[str, str] | None,
         output_byte_limit: int | None,
     ) -> bool:
+        import shlex
         PIPE = asyncio.subprocess.PIPE
         merged_env = os.environ.copy()
+        # Ensure standard system paths are always present even if the agent
+        # sends a minimal env with no PATH.
+        standard_paths = "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+        env_path = merged_env.get("PATH", "")
+        for path in standard_paths.split(":"):
+            if path not in env_path.split(":"):
+                env_path = f"{env_path}:{path}" if env_path else path
+        merged_env["PATH"] = env_path
         if env:
             merged_env.update(env)
 
-        cmd_parts = [command] + (args or [])
-        import shlex
-        cmd_str = shlex.join(cmd_parts)
+        # Build argv: when the agent sends "ls -la" as a single command string
+        # with no separate args, shlex.split parses it into ["ls", "-la"] so
+        # we can exec directly without a shell wrapper.
+        if args:
+            argv = [command] + list(args)
+        else:
+            argv = shlex.split(command)
+
+        log.debug("TerminalManager.create argv=%r cwd=%r", argv, cwd)
 
         limit = output_byte_limit or (5 * 1024 * 1024)
         try:
-            proc = await asyncio.create_subprocess_shell(
-                cmd_str,
+            proc = await asyncio.create_subprocess_exec(
+                *argv,
                 stdout=PIPE,
                 stderr=PIPE,
                 cwd=cwd,

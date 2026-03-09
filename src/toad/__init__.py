@@ -4,6 +4,9 @@ import platform
 NAME = "toad"
 TITLE = "Toad"
 
+# Bump this after every code change so `toad --version` confirms the right build.
+BUILD = "2026-03-09-H"
+
 type OS = Literal["linux", "macos", "windows", "*"]
 
 _system = platform.system()
@@ -38,9 +41,9 @@ def get_version() -> str:
     from importlib.metadata import version
 
     try:
-        return version("batrachian-toad")
+        return f"{version('batrachian-toad')} (build {BUILD})"
     except Exception:
         try:
-            return version("toad")
+            return f"{version('toad')} (build {BUILD})"
         except Exception:
-            return "0.1.0unknown"
+            return f"0.1.0unknown (build {BUILD})"

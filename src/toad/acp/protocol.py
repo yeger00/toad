@@ -205,8 +205,8 @@ class ToolCall(SchemaDict, total=False):
     content: list[ToolCallContent]
     kind: ToolKind
     locations: list[ToolCallLocation]
-    rawInput: dict
-    rawOutput: dict
+    rawInput: dict | list
+    rawOutput: dict | list
     sessionUpdate: Required[Literal["tool_call"]]
     status: ToolCallStatus
     title: Required[str]
@@ -219,8 +219,8 @@ class ToolCallUpdate(SchemaDict, total=False):
     content: list[ToolCallContent] | None
     kind: ToolKind | None
     locations: list | None
-    rawInput: dict
-    rawOutput: dict
+    rawInput: dict | list
+    rawOutput: dict | list
     sessionUpdate: Required[Literal["tool_call_update"]]
     status: ToolCallStatus | None
     title: str | None

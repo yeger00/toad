@@ -185,19 +185,36 @@ class TerminalTool(Terminal):
         fcntl.fcntl(master, fcntl.F_SETFL, flags | os.O_NONBLOCK)
 
         command = self._command
-        environment = os.environ | command.env
+        environment = dict(os.environ | command.env)
+        # Ensure standard system paths are always available, even if the agent
+        # sends a PATH that doesn't include /bin and friends.
+        standard_paths = "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+        env_path = environment.get("PATH", "")
+        for path in standard_paths.split(":"):
+            if path not in env_path.split(":"):
+                environment["PATH"] = f"{env_path}:{path}" if env_path else path
+                env_path = environment["PATH"]
 
-        if " " in command.command:
-            run_command = command.command
+        import tempfile, pathlib
+        _dbg = pathlib.Path(tempfile.gettempdir()) / "toad_terminal_debug.log"
+        with open(_dbg, "a") as _f:
+            _f.write(f"command={command.command!r} args={command.args!r}\n")
+            _f.write(f"PATH={environment.get('PATH', '')!r}\n")
+
+        # Build the argv list. Claude Code often sends "ls -la" as a single
+        # command string with no separate args. Use shlex.split to parse it
+        # into tokens so we can exec directly — no shell wrapper needed.
+        if command.args:
+            argv = [command.command] + list(command.args)
         else:
-            run_command = f"{command.command} {shlex.join(command.args)}"
+            argv = shlex.split(command.command)
 
-        shell = os.environ.get("SHELL", "sh")
-        run_command = shlex.join([shell, "-c", run_command])
+        with open(_dbg, "a") as _f:
+            _f.write(f"argv={argv!r}\n")
 
         try:
-            process = self._process = await asyncio.create_subprocess_shell(
-                run_command,
+            process = self._process = await asyncio.create_subprocess_exec(
+                *argv,
                 stdin=slave,
                 stdout=slave,
                 stderr=slave,
@@ -205,8 +222,8 @@ class TerminalTool(Terminal):
                 cwd=command.cwd,
             )
         except Exception as error:
-            self._ready_event.set()
-            print(error)
+            with open(_dbg, "a") as _f:
+                _f.write(f"SPAWN FAILED: {error!r}\n")
             raise
 
         self._ready_event.set()
@@ -225,7 +242,7 @@ class TerminalTool(Terminal):
         reader = asyncio.StreamReader(BUFFER_SIZE)
         protocol = asyncio.StreamReaderProtocol(reader)
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         transport, _ = await loop.connect_read_pipe(
             lambda: protocol, os.fdopen(master, "rb", 0)
         )

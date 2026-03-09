@@ -474,6 +474,10 @@ class Agent(AgentBase):
         env = os.environ.copy()
         env["TOAD_CWD"] = str(Path("./").absolute())
 
+        import sys as _sys
+        print(f"[agent] PATH passed to agent: {env.get('PATH', '(none)')}", file=_sys.stderr, flush=True)
+        print(f"[agent] command: {self.command!r}", file=_sys.stderr, flush=True)
+
         if (command := self.command) is None:
             self.post_message(
                 AgentFail("Failed to start agent; no run command for this OS")
@@ -500,10 +504,13 @@ class Agent(AgentBase):
 
         tasks: set[asyncio.Task] = set()
 
+        import sys as _sys
+
         async def call_jsonrpc(request: jsonrpc.JSONObject | jsonrpc.JSONList) -> None:
             try:
                 if (result := await self.server.call(request)) is not None:
                     result_json = json.dumps(result).encode("utf-8")
+                    print(f"[rpc→agent] {result_json[:300].decode('utf-8', 'replace')}", file=_sys.stderr, flush=True)
                     if process.stdin is not None:
                         process.stdin.write(b"%s\n" % result_json)
             finally:
@@ -523,6 +530,7 @@ class Agent(AgentBase):
                 self.log(f"[error] Unable to decode utf-8 from agent: {error}")
                 continue
 
+            print(f"[agent→rpc] {line_str[:300].rstrip()}", file=_sys.stderr, flush=True)
             self.log(f"[agent] {line_str}")
             try:
                 agent_data: jsonrpc.JSONType = json.loads(line_str)
@@ -735,11 +743,9 @@ class Agent(AgentBase):
 
         """
         with self.request():
-            print(1, prompt)
             session_prompt = api.session_prompt(prompt, self.session_id)
         try:
             result = await session_prompt.wait()
-            print(2, result)
         except jsonrpc.APIError as error:
             details = ""
             match error.data:
