@@ -79,6 +79,8 @@ class HerokuTunnel:
         self._session: Any = None  # aiohttp.ClientSession
         self._register_url: str = ""
         self._ssl_ctx: Any = None
+        self._new_ui_agent: str = ""
+        self._project_root: Any = None  # Path, set by cli.py
 
     async def run(self, heroku_url: str) -> None:
         import aiohttp
@@ -194,18 +196,30 @@ class HerokuTunnel:
         # public_url must NOT have trailing slash (textual-serve appends "/path")
         public_url = f"{self._heroku_url}/{self._endpoint}/{session_id}"
 
-        proc = await asyncio.create_subprocess_exec(
-            sys.argv[0], "serve",
-            "--port", str(local_port),
-            "--host", "localhost",
-            "--public-url", public_url,
-        )
+        if self._new_ui_agent:
+            from pathlib import Path
+            from toad.heroku_agent_bridge import AgentBridgeServer
+
+            project_root = self._project_root or Path(".").absolute()
+            bridge = AgentBridgeServer()
+            asyncio.ensure_future(
+                bridge.start(local_port, self._new_ui_agent, project_root)
+            )
+            proc: Any = bridge
+            # Give aiohttp time to bind
+            await asyncio.sleep(0.3)
+        else:
+            proc = await asyncio.create_subprocess_exec(
+                sys.argv[0], "serve",
+                "--port", str(local_port),
+                "--host", "localhost",
+                "--public-url", public_url,
+            )
+            # Give textual-serve time to bind
+            await asyncio.sleep(1.5)
 
         sd = SessionData(session_id=session_id, local_port=local_port, proc=proc)
         self._sessions[session_id] = sd
-
-        # Give textual-serve time to bind
-        await asyncio.sleep(1.5)
 
         log.info("Session spawned: %s on port %d", session_id, local_port)
 

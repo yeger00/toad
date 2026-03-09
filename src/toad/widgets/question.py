@@ -328,6 +328,7 @@ class Question(containers.VerticalGroup, can_focus=True):
         self._reset_blink()
         if not self.selected:
             self.selection = event.index
+            self.action_select()
 
 
 if __name__ == "__main__":

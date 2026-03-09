@@ -296,22 +296,37 @@ def replay(path: str) -> None:
     default=None,
     help="Public URL for textual_serve Server (e.g. https://example.com)",
 )
+@click.option(
+    "--new-ui",
+    metavar="AGENT",
+    default=None,
+    help="Serve ACP agent with web chat UI instead of Toad TUI (requires TUNNEL_URL)",
+)
 def serve(
     tunnel_url: str | None,
     port: int,
     host: str,
     public_url: str | None = None,
+    new_ui: str | None = None,
 ) -> None:
     """Serve Toad as a web application.
 
     When TUNNEL_URL is provided (e.g. https://my-app.heroku.com), connects
     to the Heroku relay server and exposes Toad on a public URL.
+
+    Use --new-ui AGENT to spawn an ACP agent (e.g. claude, opencode) with a
+    responsive web chat UI instead of the Toad TUI.
     """
     if tunnel_url:
         import asyncio
+        from pathlib import Path
         from toad.heroku_tunnel import HerokuTunnel
 
-        asyncio.run(HerokuTunnel().run(tunnel_url))
+        tunnel = HerokuTunnel()
+        if new_ui:
+            tunnel._new_ui_agent = new_ui
+            tunnel._project_root = Path(".").absolute()
+        asyncio.run(tunnel.run(tunnel_url))
         return
 
     from textual_serve.server import Server
