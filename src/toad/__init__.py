@@ -5,7 +5,7 @@ NAME = "toad"
 TITLE = "Toad"
 
 # Bump this after every code change so `toad --version` confirms the right build.
-BUILD = "2026-03-09-H"
+BUILD = "2026-03-09-J"
 
 type OS = Literal["linux", "macos", "windows", "*"]
 

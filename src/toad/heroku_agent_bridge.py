@@ -98,6 +98,8 @@ details.thinking summary:hover { color: var(--text); }
 .plan-in_progress .plan-bullet::before { content: '◉'; color: var(--blue); }
 .plan-completed .plan-bullet::before { content: '●'; color: var(--green); }
 .permission-card { background: var(--tool-bg); border: 1px solid var(--accent); border-radius: 8px; padding: 12px; margin: 6px 0; }
+.tool-result { background: var(--tool-bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin: 6px 0; font-size: 13px; }
+.tool-result pre { margin: 0; font-family: monospace; font-size: 12px; line-height: 1.6; white-space: pre-wrap; word-break: break-all; color: var(--text); }
 .permission-title { font-size: 13px; font-weight: 600; margin-bottom: 10px; }
 .permission-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
 .perm-btn { padding: 6px 14px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface2); color: var(--text); font-size: 13px; cursor: pointer; transition: background 0.15s; }
@@ -256,7 +258,17 @@ function renderDiff(content) {
   return div;
 }
 
-function upsertToolCard(id, title, kind, status, content) {
+function extractRawText(rawOutput) {
+  if (!rawOutput) return '';
+  if (typeof rawOutput === 'string') return rawOutput;
+  if (Array.isArray(rawOutput)) {
+    return rawOutput.filter(x => x && x.type === 'text' && x.text).map(x => x.text).join('');
+  }
+  if (typeof rawOutput === 'object' && rawOutput.output) return String(rawOutput.output);
+  return '';
+}
+
+function upsertToolCard(id, title, kind, status, content, rawOutput) {
   let card = toolCards[id];
   if (!card) {
     card = mkEl('div', 'tool-card');
@@ -278,17 +290,51 @@ function upsertToolCard(id, title, kind, status, content) {
   const badgeEl = card.querySelector('.tool-status-badge');
   if (title) titleEl.textContent = title;
   badgeEl.textContent = s;
-  if (content && content.length) {
+
+  if (s === 'completed' || s === 'failed') {
+    const permCard = permissionCards[id];
+    if (permCard) {
+      // Keep tool card collapsed, show result BELOW the permission card.
+      const body = card.querySelector('.tool-body');
+      body.innerHTML = '';
+      card.classList.remove('open');
+
+      let resultDiv = document.querySelector(`.tool-result[data-id="${id}"]`);
+      if (!resultDiv) {
+        resultDiv = mkEl('div', 'tool-result');
+        resultDiv.dataset.id = id;
+        permCard.insertAdjacentElement('afterend', resultDiv);
+      }
+      resultDiv.innerHTML = '';
+      const text = extractRawText(rawOutput);
+      if (text) {
+        const pre = mkEl('pre');
+        pre.textContent = text;
+        resultDiv.appendChild(pre);
+      } else if (content && content.length) {
+        resultDiv.appendChild(renderDiff(content));
+      }
+    } else {
+      if (content && content.length) {
+        const body = card.querySelector('.tool-body');
+        body.innerHTML = '';
+        body.appendChild(renderDiff(content));
+        card.classList.add('open');
+      }
+    }
+  } else if (content && content.length) {
     const body = card.querySelector('.tool-body');
     body.innerHTML = '';
     body.appendChild(renderDiff(content));
-    if (s === 'completed' || s === 'failed') card.classList.add('open');
   }
   scrollBottom();
 }
 
 function showPermission(id, title, options) {
   if (permissionCards[id]) return;
+  // Close the current assistant bubble so any post-permission agent text
+  // starts a new bubble that appears AFTER the permission card.
+  finalizeAssistant();
   const card = mkEl('div', 'permission-card');
   const titleEl = mkEl('div', 'permission-title', title || 'Permission required');
   card.appendChild(titleEl);
@@ -365,11 +411,11 @@ function handleMessage(data) {
       break;
 
     case 'tool_call':
-      upsertToolCard(data.id, data.title, data.kind, data.status || 'pending', data.content);
+      upsertToolCard(data.id, data.title, data.kind, data.status || 'pending', data.content, data.rawOutput);
       break;
 
     case 'tool_call_update':
-      upsertToolCard(data.id, data.title, data.kind, data.status, data.content);
+      upsertToolCard(data.id, data.title, data.kind, data.status, data.content, data.rawOutput);
       break;
 
     case 'plan': {
@@ -952,6 +998,7 @@ class AgentBridgeSession:
                 "kind": tc.get("kind"),
                 "status": tc.get("status", "pending"),
                 "content": self._serialize_content(tc.get("content")),
+                "rawOutput": tc.get("rawOutput"),
             }
 
         if isinstance(msg, messages.ToolCallUpdate):
@@ -963,6 +1010,7 @@ class AgentBridgeSession:
                 "kind": tc.get("kind"),
                 "status": tc.get("status"),
                 "content": self._serialize_content(tc.get("content")),
+                "rawOutput": tc.get("rawOutput"),
             }
 
         if isinstance(msg, messages.Plan):
