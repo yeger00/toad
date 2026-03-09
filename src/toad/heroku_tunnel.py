@@ -118,7 +118,12 @@ class HerokuTunnel:
     async def _connect_once(self) -> None:
         import aiohttp
 
-        async with self._session.ws_connect(self._register_url, ssl=self._ssl_ctx) as ws:
+        async with self._session.ws_connect(
+            self._register_url,
+            ssl=self._ssl_ctx,
+            heartbeat=20.0,
+            timeout=aiohttp.ClientTimeout(total=None, connect=60),
+        ) as ws:
             self._tunnel_ws = ws
 
             # New handshake: client speaks first
@@ -311,10 +316,10 @@ class HerokuTunnel:
         query = data.get("query", "")
 
         if sd.local_ws is None or sd.local_ws.closed:
-            # Open the single local WS for this session
-            url = f"ws://localhost:{sd.local_port}{path}"
-            if query:
-                url = f"{url}?{query}"
+            # Open the single local WS for this session.
+            # Always include session_id so AgentBridgeServer can route reconnects.
+            qs_parts = [p for p in [query, f"session_id={session_id}"] if p]
+            url = f"ws://localhost:{sd.local_port}{path}?{'&'.join(qs_parts)}"
             try:
                 local_ws = await self._session.ws_connect(url)
             except Exception as exc:

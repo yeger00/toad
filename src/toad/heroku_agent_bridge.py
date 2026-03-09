@@ -752,26 +752,78 @@ class WebMessageTarget:
 
 
 class AgentBridgeSession:
+    # How long to keep the agent alive after the browser disconnects.
+    DETACH_TIMEOUT = 300.0  # seconds
+
     def __init__(
         self,
         ws: Any,
         agent_name: str,
         project_root: Path,
+        session_id: str = "",
+        on_expire: Any = None,
     ) -> None:
         self._ws = ws
         self._agent_name = agent_name
         self._project_root = project_root
+        self._session_id = session_id
+        self._on_expire = on_expire  # callable(session_id) when agent is stopped
         self._agent: Any = None
         self._agent_started = False  # True after AgentReady received
         self._message_target: WebMessageTarget | None = None
         self._tm = TerminalManager()
         self._prompt_tasks: set[asyncio.Task] = set()
+        self._expiry_task: asyncio.Task | None = None
+        self._expired = False
+
+    @property
+    def is_expired(self) -> bool:
+        return self._expired
 
     async def run(self) -> None:
+        """Start the agent and service the first WS connection."""
         started = await self._start_agent()
         if not started:
             return
+        await self._run_loops()
+        # WS closed — keep agent alive, start expiry countdown.
+        self._expiry_task = asyncio.ensure_future(self._expire_after(self.DETACH_TIMEOUT))
 
+    async def reconnect(self, ws: Any) -> None:
+        """Attach a new WebSocket to this running session (browser reconnected)."""
+        # Cancel any pending expiry timer.
+        if self._expiry_task and not self._expiry_task.done():
+            self._expiry_task.cancel()
+            try:
+                await self._expiry_task
+            except asyncio.CancelledError:
+                pass
+        self._expiry_task = None
+
+        self._ws = ws
+
+        # Drain messages that piled up while disconnected — start fresh.
+        if self._message_target is not None:
+            q = self._message_target._event_queue
+            while not q.empty():
+                try:
+                    q.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+
+        # Tell the browser the agent is ready.
+        if self._agent_started:
+            try:
+                await ws.send_json({"type": "agent_ready"})
+            except Exception:
+                pass
+
+        await self._run_loops()
+        # WS closed again — restart expiry.
+        self._expiry_task = asyncio.ensure_future(self._expire_after(self.DETACH_TIMEOUT))
+
+    async def _run_loops(self) -> None:
+        """Run the read/send loops until the current WS closes."""
         assert self._message_target is not None
 
         read_task = asyncio.ensure_future(self._read_from_ws())
@@ -788,17 +840,24 @@ class AgentBridgeSession:
             except asyncio.CancelledError:
                 pass
 
-        # Cancel any in-flight _do_prompt tasks so they don't run as zombies
+        # Cancel any in-flight _do_prompt tasks so they don't run as zombies.
         for task in list(self._prompt_tasks):
             task.cancel()
         if self._prompt_tasks:
             await asyncio.gather(*self._prompt_tasks, return_exceptions=True)
 
+    async def _expire_after(self, seconds: float) -> None:
+        """Stop the agent after `seconds` of inactivity (no browser reconnect)."""
+        await asyncio.sleep(seconds)
+        self._expired = True
+        log.info("[bridge] session %s expired after %.0fs with no reconnect", self._session_id, seconds)
         if self._agent is not None:
             try:
                 await self._agent.stop()
             except Exception:
                 pass
+        if self._on_expire:
+            self._on_expire(self._session_id)
 
     async def _start_agent(self) -> bool:
         from toad.cli import get_agent_data
@@ -1085,6 +1144,8 @@ class AgentBridgeServer:
         self._stop_event = asyncio.Event()
         self._agent_name: str = ""
         self._project_root: Path = Path(".").absolute()
+        # session_id → AgentBridgeSession (kept alive across WS reconnects)
+        self._sessions: dict[str, AgentBridgeSession] = {}
 
     def terminate(self) -> None:
         """Called by HerokuTunnel cleanup — signal the server to stop."""
@@ -1133,12 +1194,33 @@ class AgentBridgeServer:
         ws = WebSocketResponse()
         await ws.prepare(request)
 
-        session = AgentBridgeSession(ws, self._agent_name, self._project_root)
-        try:
-            await session.run()
-        except Exception as exc:
-            print(f"[bridge] session error: {exc}", file=sys.stderr)
-            import traceback
-            traceback.print_exc()
+        session_id = request.rel_url.query.get("session_id", "")
+        existing = self._sessions.get(session_id) if session_id else None
+
+        if existing is not None and not existing.is_expired:
+            # Reconnect browser to the still-running agent session.
+            try:
+                await existing.reconnect(ws)
+            except Exception as exc:
+                print(f"[bridge] reconnect error: {exc}", file=sys.stderr)
+        else:
+            def _on_expire(sid: str) -> None:
+                self._sessions.pop(sid, None)
+
+            session = AgentBridgeSession(
+                ws,
+                self._agent_name,
+                self._project_root,
+                session_id=session_id,
+                on_expire=_on_expire,
+            )
+            if session_id:
+                self._sessions[session_id] = session
+            try:
+                await session.run()
+            except Exception as exc:
+                print(f"[bridge] session error: {exc}", file=sys.stderr)
+                import traceback
+                traceback.print_exc()
 
         return ws
